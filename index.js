@@ -1,11 +1,22 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import { pathToFileURL } from "node:url";
 import router from "./routes/routes.js";
 
 const app = express();
 
-// Permite que el front (que corre en otro puerto, ej: 5173) le pida cosas al back
-app.use(cors());
+// Orígenes (fronts) que pueden pedirle cosas al back. Se configuran en la variable
+// CORS_ORIGINS separados por coma; si no está, se usan el front local y el de Vercel.
+const ORIGENES_PERMITIDOS = (process.env.CORS_ORIGINS || "http://localhost:5173,https://sumatoria-beryl.vercel.app")
+    .split(",")
+    .map((origen) => origen.trim().replace(/\/$/, ""))
+    .filter(Boolean);
+
+app.use(cors({
+    // Los pedidos sin "origin" (Postman, curl, el propio servidor) se dejan pasar
+    origin: (origen, callback) => callback(null, !origen || ORIGENES_PERMITIDOS.includes(origen))
+}));
 
 // Las imágenes (logo, portada, foto) llegan como texto base64, por eso el límite es más grande
 app.use(express.json({ limit: "10mb" }));
@@ -35,8 +46,13 @@ app.use((error, req, res, next) => {
     res.status(500).json({ mensaje: "Error interno del servidor" });
 });
 
-const PORT = process.env.PORT || 3000;
+// En Vercel no se llama a listen: Vercel importa la app y la ejecuta como función.
+// Solo se levanta el servidor cuando se corre este archivo directo (npm start / npm run dev).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => {
+        console.log(`Servidor corriendo en http://localhost:${PORT}`);
+    });
+}
 
-app.listen(PORT, () => {
-    console.log(`Servidor corriendo en http://localhost:${PORT}`);
-});
+export default app;
