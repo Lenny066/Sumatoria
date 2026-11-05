@@ -26,9 +26,42 @@ export function aPromocion(fila, mediosPago) {
         imagen: fila.imagen ?? undefined,
         dias: fila.dias,
         mediosPago,
-        vence: fila.vence ?? undefined
+        vence: fila.vence ?? undefined,
+        precioReal: aPrecio(fila.precio_real),
+        precioPromo: aPrecio(fila.precio_promo),
+        porcentaje: aPrecio(fila.porcentaje)
     };
 }
+
+export function aPrecio(valor) {
+    return valor === null || valor === undefined ? undefined : Number(valor);
+}
+
+export const MEDIOS_DE_PROMO = `COALESCE((
+    SELECT json_agg(json_build_object('tipo', a.tipo, 'red_pago', a.red_pago, 'emisor', a.emisor) ORDER BY a.id_aplican)
+    FROM aplican a
+    WHERE a.id_descuento = d.id_descuento
+), '[]') AS medios`;
+
+export function mediosDeFila(fila) {
+    return (fila.medios ?? []).map(aMedioPago);
+}
+
+export function mediosParaGuardar(mediosPago) {
+    return JSON.stringify(
+        (mediosPago ?? []).map((medio) => {
+            const esTarjeta = medio.tipo === "debito" || medio.tipo === "credito";
+            return {
+                tipo: medio.tipo,
+                red_pago: esTarjeta ? medio.marca || null : null,
+                emisor: esTarjeta ? medio.banco || null : null
+            };
+        })
+    );
+}
+
+export const MEDIOS_NUEVOS = `ROWS FROM (jsonb_to_recordset($MEDIOS::jsonb) AS (tipo text, red_pago text, emisor text))
+    WITH ORDINALITY AS m(tipo, red_pago, emisor, orden)`;
 
 // Medios de pago de varias promos de una sola vez: { idPromo: [medios] }
 export async function mediosPagoDePromos(idsPromos) {
@@ -78,27 +111,27 @@ export async function tarjetasDeQuienPide(sesion) {
 // Arma los negocios completos (con horarios y promociones) a partir de
 // una lista de ids de sucursal, respetando el orden de la lista.
 // ---------------------------------------------------------------------
-export async function armarNegocios(idsSucursales, tarjetas = []) {
+export async function armarNegocios(idsSucursales, tarjetasPedidas = []) {
     if (idsSucursales.length === 0) return [];
 
-    const sucursales = await db.query(
-        `SELECT s.id_sucursal, s.direccion, s.lat, s.lng, s.horarios,
-                e.nombre, e.rubro, e.logo, e.portada, e.descripcion
-         FROM sucursal s
-         JOIN empresa e ON e.id_empresa = s.id_empresa
-         WHERE s.id_sucursal = ANY($1::int[])`,
-        [idsSucursales]
-    );
-
-    const promos = await db.query(
-        `SELECT d.*
-         FROM descuentos_sucursal d
-         WHERE d.id_sucursal = ANY($1::int[]) AND ${PROMO_VIGENTE}
-         ORDER BY d.fecha DESC`,
-        [idsSucursales]
-    );
-
-    const medios = await mediosPagoDePromos(promos.rows.map((p) => p.id_descuento));
+    const [sucursales, promos, tarjetas] = await Promise.all([
+        db.query(
+            `SELECT s.id_sucursal, s.direccion, s.lat, s.lng, s.horarios,
+                    e.nombre, e.rubro, e.logo, e.portada, e.descripcion
+             FROM sucursal s
+             JOIN empresa e ON e.id_empresa = s.id_empresa
+             WHERE s.id_sucursal = ANY($1::int[])`,
+            [idsSucursales]
+        ),
+        db.query(
+            `SELECT d.*, ${MEDIOS_DE_PROMO}
+             FROM descuentos_sucursal d
+             WHERE d.id_sucursal = ANY($1::int[]) AND ${PROMO_VIGENTE}
+             ORDER BY d.fecha DESC`,
+            [idsSucursales]
+        ),
+        tarjetasPedidas
+    ]);
 
     const negocios = sucursales.rows.map((s) => ({
         id: String(s.id_sucursal),
@@ -113,7 +146,7 @@ export async function armarNegocios(idsSucursales, tarjetas = []) {
         horarios: s.horarios,
         promociones: promos.rows
             .filter((p) => p.id_sucursal === s.id_sucursal)
-            .map((p) => aPromocion(p, medios[p.id_descuento] ?? []))
+            .map((p) => aPromocion(p, mediosDeFila(p)))
             .filter((promo) => sirveConTarjetas(promo, tarjetas))
     }));
 
@@ -129,13 +162,13 @@ export async function armarNegocios(idsSucursales, tarjetas = []) {
 
 // GET /negocios y GET /negocios?buscar=texto
 export const listarNegocios = async (buscar, sesion) => {
-    let resultado;
+    let consulta;
 
     if (buscar && buscar.trim() !== "") {
         // Busca en nombre, rubro, descripción, dirección y en las promos
         // (unaccent no siempre está instalado, por eso se usa ILIKE común)
         const patron = `%${buscar.trim()}%`;
-        resultado = await db.query(
+        consulta = db.query(
             `SELECT DISTINCT s.id_sucursal
              FROM sucursal s
              JOIN empresa e ON e.id_empresa = s.id_empresa
@@ -145,17 +178,16 @@ export const listarNegocios = async (buscar, sesion) => {
             [patron]
         );
     } else {
-        resultado = await db.query("SELECT id_sucursal FROM sucursal ORDER BY id_sucursal");
+        consulta = db.query("SELECT id_sucursal FROM sucursal ORDER BY id_sucursal");
     }
 
-    const tarjetas = await tarjetasDeQuienPide(sesion);
+    const [resultado, tarjetas] = await Promise.all([consulta, tarjetasDeQuienPide(sesion)]);
     return armarNegocios(resultado.rows.map((f) => f.id_sucursal), tarjetas);
 };
 
 // GET /negocios/:id
 export const obtenerNegocio = async (idSucursal, sesion) => {
-    const tarjetas = await tarjetasDeQuienPide(sesion);
-    const [negocio] = await armarNegocios([idSucursal], tarjetas);
+    const [negocio] = await armarNegocios([idSucursal], tarjetasDeQuienPide(sesion));
 
     if (!negocio) throw crearError(404, "Negocio no encontrado");
     return negocio;
@@ -163,60 +195,54 @@ export const obtenerNegocio = async (idSucursal, sesion) => {
 
 // GET /inicio -> { hot, sugeridas, elegidos, nuevos }
 export const seccionesInicio = async (sesion) => {
-    const tarjetas = await tarjetasDeQuienPide(sesion);
     const LIMITE = 10;
+    const idUsuario = sesion?.rol === "usuario" ? sesion.id : null;
 
-    // HOT: los que tienen promos más guardadas en favoritos
-    const hot = await db.query(
-        `SELECT d.id_sucursal, COUNT(f.id_usuario) AS favoritos, COUNT(DISTINCT d.id_descuento) AS promos
-         FROM descuentos_sucursal d
-         LEFT JOIN favea_sucursal f ON f.id_descuento = d.id_descuento
-         WHERE ${PROMO_VIGENTE}
-         GROUP BY d.id_sucursal
-         ORDER BY favoritos DESC, promos DESC
-         LIMIT $1`,
-        [LIMITE]
-    );
-
-    // ELEGIDOS: los que tienen más seguidores
-    const elegidos = await db.query(
-        `SELECT s.id_sucursal, COUNT(sg.id_usuario) AS seguidores
-         FROM sucursal s
-         LEFT JOIN seguimiento sg ON sg.id_sucursal = s.id_sucursal
-         GROUP BY s.id_sucursal
-         HAVING COUNT(sg.id_usuario) > 0
-         ORDER BY seguidores DESC
-         LIMIT $1`,
-        [LIMITE]
-    );
-
-    // NUEVOS: los últimos negocios que se sumaron
-    const nuevos = await db.query(
-        "SELECT id_sucursal FROM sucursal ORDER BY creado_en DESC LIMIT $1",
-        [LIMITE]
-    );
-
-    // SUGERIDAS: si el usuario cargó su barrio, primero los de su barrio; después el resto con promos
-    let barrio = "";
-    if (sesion?.rol === "usuario") {
-        const r = await db.query("SELECT barrio FROM usuario WHERE id_usuario = $1", [sesion.id]);
-        barrio = r.rows[0]?.barrio ?? "";
-    }
-    const sugeridas = await db.query(
-        `SELECT s.id_sucursal
-         FROM sucursal s
-         WHERE EXISTS (SELECT 1 FROM descuentos_sucursal d WHERE d.id_sucursal = s.id_sucursal AND ${PROMO_VIGENTE})
-         ORDER BY ($1 <> '' AND s.direccion ILIKE '%' || $1 || '%') DESC, random()
-         LIMIT $2`,
-        [barrio, LIMITE]
-    );
+    const [tarjetas, hot, elegidos, nuevos, sugeridas] = await Promise.all([
+        tarjetasDeQuienPide(sesion),
+        db.query(
+            `SELECT d.id_sucursal, COUNT(f.id_usuario) AS favoritos, COUNT(DISTINCT d.id_descuento) AS promos
+             FROM descuentos_sucursal d
+             LEFT JOIN favea_sucursal f ON f.id_descuento = d.id_descuento
+             WHERE ${PROMO_VIGENTE}
+             GROUP BY d.id_sucursal
+             ORDER BY favoritos DESC, promos DESC
+             LIMIT $1`,
+            [LIMITE]
+        ),
+        db.query(
+            `SELECT s.id_sucursal, COUNT(sg.id_usuario) AS seguidores
+             FROM sucursal s
+             LEFT JOIN seguimiento sg ON sg.id_sucursal = s.id_sucursal
+             GROUP BY s.id_sucursal
+             HAVING COUNT(sg.id_usuario) > 0
+             ORDER BY seguidores DESC
+             LIMIT $1`,
+            [LIMITE]
+        ),
+        db.query("SELECT id_sucursal FROM sucursal ORDER BY creado_en DESC LIMIT $1", [LIMITE]),
+        db.query(
+            `WITH b AS (
+                SELECT COALESCE((SELECT barrio FROM usuario WHERE id_usuario = $1), '') AS barrio
+             )
+             SELECT s.id_sucursal
+             FROM sucursal s, b
+             WHERE EXISTS (SELECT 1 FROM descuentos_sucursal d WHERE d.id_sucursal = s.id_sucursal AND ${PROMO_VIGENTE})
+             ORDER BY (b.barrio <> '' AND s.direccion ILIKE '%' || b.barrio || '%') DESC, random()
+             LIMIT $2`,
+            [idUsuario, LIMITE]
+        )
+    ]);
 
     const ids = (resultado) => resultado.rows.map((f) => f.id_sucursal);
+    const todos = [...new Set([...ids(hot), ...ids(sugeridas), ...ids(elegidos), ...ids(nuevos)])];
+    const negocios = new Map((await armarNegocios(todos, tarjetas)).map((n) => [n.id, n]));
+    const elegir = (resultado) => ids(resultado).map((id) => negocios.get(String(id))).filter(Boolean);
 
     return {
-        hot: await armarNegocios(ids(hot), tarjetas),
-        sugeridas: await armarNegocios(ids(sugeridas), tarjetas),
-        elegidos: await armarNegocios(ids(elegidos), tarjetas),
-        nuevos: await armarNegocios(ids(nuevos), tarjetas)
+        hot: elegir(hot),
+        sugeridas: elegir(sugeridas),
+        elegidos: elegir(elegidos),
+        nuevos: elegir(nuevos)
     };
 };

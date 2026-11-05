@@ -137,7 +137,7 @@ Mismo formato que `Mensaje` en `IA.tsx`. Si el chat está vacío, `GET /chat` de
 | Mi negocio | `GET /empresa/negocio` | — | `MiNegocio` |
 | Editar negocio | `PUT /empresa/negocio` | `{ nombre?, descripcion?, rubro?, direccion?, horarios?, logo?, portada?, mediosPago? }` | `MiNegocio` |
 | Mis promociones | `GET /empresa/promos` | — | `PromoNegocio[]` (activas, pausadas y vencidas) |
-| Crear promo | `POST /empresa/promos` | `{ titulo, descripcion?, imagen?, dias, mediosPago, vence?, estado? }` | `PromoNegocio` |
+| Crear promo | `POST /empresa/promos` | `{ titulo, descripcion?, imagen?, dias, mediosPago, vence?, estado?, precioReal?, precioPromo?, porcentaje? }` | `PromoNegocio` |
 | Editar / pausar promo | `PUT /empresa/promos/:id` | solo lo que cambia, ej: `{ estado: "pausada" }` | `PromoNegocio` |
 | Borrar promo | `DELETE /empresa/promos/:id` | — | `{ mensaje }` |
 
@@ -150,3 +150,23 @@ Formatos válidos:
 - `vence`: `"2026-11-30"` o `null`.
 - `mediosPago` de una promo: `[{ "tipo": "efectivo" }, { "tipo": "debito", "marca": "visa", "banco": null }]`. Con `marca` o `banco` en `null` significa "cualquiera".
 - Imágenes (`logo`, `portada`, `foto`, `imagen`): el texto base64 que ya genera `leerImagen()`. Máximo 10 MB por pedido.
+
+---
+
+## Ahorro del usuario
+
+Antes de usar estas rutas hay que correr `sql/ahorro.sql` una vez en el SQL Editor de Neon.
+
+| Pantalla | Método y ruta | Body | Respuesta |
+|---|---|---|---|
+| Inicio y Perfil | `GET /usuario/ahorro` | — | `{ mes, total, usosMes }` |
+| Mi ahorro (historial) | `GET /usuario/ahorro/meses` | — | `[{ mes: "2026-11", ahorro, usos }]` los últimos 12 meses, del más nuevo al más viejo, con $0 en los meses sin uso |
+| Botón "Usé esta promo" | `POST /promos/:id/usar` | `{ ahorro? }` o `{ sinDescuento? }` | `{ ahorro, mes, total, usosMes }` |
+
+- Si la promo tiene `precioReal` y `precioPromo`, el ahorro se calcula solo (`precioReal - precioPromo`) y se ignora el `ahorro` del body.
+- Si tiene `porcentaje` (ej: 20 para "20% OFF en todo"), el usuario dice cuánto salía su compra sin el descuento y se manda en `sinDescuento`. El ahorro es `sinDescuento × porcentaje / 100`. Hay que correr también `sql/porcentaje.sql`.
+- Si no tiene precios ni porcentaje, el usuario dice cuánto ahorró y se manda en `ahorro` (número mayor a 0).
+- Una promo tiene precio fijo o porcentaje, nunca los dos.
+- `precioReal` y `precioPromo` van juntos o no van: el de la promo tiene que ser menor al real.
+- El mes se cuenta con la hora de Argentina.
+

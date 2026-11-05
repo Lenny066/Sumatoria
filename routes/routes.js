@@ -48,6 +48,10 @@ router.get("/notificaciones/sin-leer", soloUsuario, extras.notificacionesSinLeer
 router.put("/notificaciones/leidas", soloUsuario, extras.marcarNotificacionesLeidas);
 
 // ===== Usuario: chat con la IA =====
+router.get("/usuario/ahorro", soloUsuario, extras.miAhorro);
+router.get("/usuario/ahorro/meses", soloUsuario, extras.miAhorroPorMes);
+router.post("/promos/:id/usar", soloUsuario, extras.usarPromo);
+
 router.get("/chat", soloUsuario, extras.historialChat);
 router.post("/chat", soloUsuario, extras.enviarMensajeChat);
 

@@ -1,6 +1,6 @@
 import * as promoService from "../services/promoServices.js";
 import { aId, manejarError } from "../utils/manejarError.js";
-import { diasValidos, fechaValida, mediosPagoValidos, textoValido } from "../utils/validar.js";
+import { diasValidos, fechaValida, mediosPagoValidos, porcentajeValido, preciosValidos, textoValido } from "../utils/validar.js";
 
 // Revisa los datos de una promo. "parcial" = en una edición, los campos son opcionales
 function validarPromo(datos, parcial) {
@@ -12,6 +12,11 @@ function validarPromo(datos, parcial) {
     if (!falta("mediosPago") && !mediosPagoValidos(datos.mediosPago)) return "Los medios de pago no son válidos";
     if (!fechaValida(datos.vence)) return "La fecha de vencimiento tiene que tener el formato AAAA-MM-DD";
     if (!falta("estado") && !["activa", "pausada"].includes(datos.estado)) return "El estado tiene que ser 'activa' o 'pausada'";
+    if (!preciosValidos(datos.precioReal, datos.precioPromo)) return "Cargá el precio real y el precio con la promo, y que el de la promo sea menor";
+    if (!porcentajeValido(datos.porcentaje)) return "El porcentaje tiene que ser un número entre 1 y 99";
+    const conPrecios = datos.precioReal !== undefined && datos.precioReal !== null;
+    const conPorcentaje = datos.porcentaje !== undefined && datos.porcentaje !== null;
+    if (conPrecios && conPorcentaje) return "Elegí precio fijo o porcentaje, no los dos";
     return null;
 }
 

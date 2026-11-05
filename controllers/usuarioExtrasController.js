@@ -3,6 +3,7 @@ import * as favoritoService from "../services/favoritoServices.js";
 import * as seguimientoService from "../services/seguimientoServices.js";
 import * as notificacionService from "../services/notificacionServices.js";
 import * as chatService from "../services/chatServices.js";
+import * as ahorroService from "../services/ahorroServices.js";
 import { aId, manejarError } from "../utils/manejarError.js";
 import { textoValido } from "../utils/validar.js";
 
@@ -160,6 +161,46 @@ export async function enviarMensajeChat(req, res) {
 
     try {
         return res.status(200).json(await chatService.enviarMensaje(req.usuario.id, texto.trim()));
+    } catch (error) {
+        return manejarError(error, res);
+    }
+}
+
+export async function miAhorro(req, res) {
+    try {
+        return res.status(200).json(await ahorroService.obtenerAhorro(req.usuario.id));
+    } catch (error) {
+        return manejarError(error, res);
+    }
+}
+
+export async function miAhorroPorMes(req, res) {
+    try {
+        return res.status(200).json(await ahorroService.ahorroPorMes(req.usuario.id));
+    } catch (error) {
+        return manejarError(error, res);
+    }
+}
+
+export async function usarPromo(req, res) {
+    const idPromo = aId(req.params.id);
+    if (!idPromo) {
+        return res.status(404).json({ mensaje: "Promoción no encontrada" });
+    }
+
+    const { ahorro, sinDescuento } = req.body ?? {};
+    const noEsNumero = (valor) => valor !== undefined && valor !== null && typeof valor !== "number";
+    if (noEsNumero(ahorro) || noEsNumero(sinDescuento)) {
+        return res.status(400).json({ mensaje: "El monto tiene que ser un número" });
+    }
+
+    try {
+        return res.status(200).json(
+            await ahorroService.usarPromo(req.usuario.id, idPromo, {
+                ahorro: ahorro ?? undefined,
+                sinDescuento: sinDescuento ?? undefined
+            })
+        );
     } catch (error) {
         return manejarError(error, res);
     }

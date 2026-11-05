@@ -42,6 +42,27 @@ export function diasValidos(dias) {
     return Array.isArray(dias) && dias.every((dia) => DIAS.includes(dia));
 }
 
+export function precioValido(precio) {
+    return precio === null || precio === undefined || (typeof precio === "number" && Number.isFinite(precio) && precio >= 0);
+}
+
+export function preciosValidos(precioReal, precioPromo) {
+    if (!precioValido(precioReal) || !precioValido(precioPromo)) return false;
+    const sinReal = precioReal === null || precioReal === undefined;
+    const sinPromo = precioPromo === null || precioPromo === undefined;
+    if (sinReal && sinPromo) return true;
+    if (sinReal || sinPromo) return false;
+    return precioReal > 0 && precioPromo < precioReal;
+}
+
+export function porcentajeValido(porcentaje) {
+    return (
+        porcentaje === null ||
+        porcentaje === undefined ||
+        (typeof porcentaje === "number" && Number.isFinite(porcentaje) && porcentaje > 0 && porcentaje < 100)
+    );
+}
+
 // "2026-11-30" o null
 export function fechaValida(fecha) {
     return fecha === null || fecha === undefined || fecha === "" || FECHA.test(fecha);

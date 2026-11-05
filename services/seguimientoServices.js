@@ -12,8 +12,8 @@ async function idsSeguidos(idUsuario) {
 
 // GET /usuario/seguidos -> negocios que sigue
 export const listarSeguidos = async (sesion) => {
-    const tarjetas = await tarjetasDeQuienPide(sesion);
-    return armarNegocios(await idsSeguidos(sesion.id), tarjetas);
+    const [ids, tarjetas] = await Promise.all([idsSeguidos(sesion.id), tarjetasDeQuienPide(sesion)]);
+    return armarNegocios(ids, tarjetas);
 };
 
 // GET /usuario/seguidos/ids -> ["1", "4"] (para saber qué botones pintar como "Siguiendo")

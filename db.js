@@ -14,7 +14,7 @@ export const db = new Pool({
     // En Vercel puede haber varias copias de la función a la vez y cada una tiene su pool,
     // así que se usan pocas conexiones por copia para no agotar las de la base.
     max: process.env.VERCEL ? 3 : 10,
-    idleTimeoutMillis: 30000,
+    idleTimeoutMillis: process.env.VERCEL ? 30000 : 240000,
     keepAlive: true
 });
 

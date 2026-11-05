@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import { pathToFileURL } from "node:url";
 import router from "./routes/routes.js";
+import { db } from "./db.js";
 
 const app = express();
 
@@ -52,6 +53,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
         console.log(`Servidor corriendo en http://localhost:${PORT}`);
+        db.query("SELECT 1").catch((error) => console.error("No se pudo conectar con la base:", error.message));
     });
 }
 
