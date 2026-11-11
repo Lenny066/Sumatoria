@@ -126,7 +126,9 @@ async function responderConIA(pregunta, imagen, promos, tarjetas, anteriores) {
         throw new Error(`La IA respondió con estado ${respuesta.status}: ${await respuesta.text()}`);
     }
     const datos = await respuesta.json();
-    return (datos.choices?.[0]?.message?.content ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+    const contenido = (datos.choices?.[0]?.message?.content ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+    if (!contenido) throw new Error("La IA respondió un mensaje vacío");
+    return contenido;
 }
 
 // ---------------------------------------------------------------------
