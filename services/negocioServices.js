@@ -88,10 +88,7 @@ export function sirveConTarjetas(promo, tarjetas) {
     if (tarjetas.length === 0 || promo.mediosPago.length === 0) return true;
 
     return promo.mediosPago.some((medio) => {
-        if (medio.tipo !== "debito" && medio.tipo !== "credito") {
-            // efectivo y transferencia los puede usar cualquiera
-            return medio.tipo === "efectivo" || medio.tipo === "transferencia";
-        }
+        if (medio.tipo !== "debito" && medio.tipo !== "credito") return true;
         return tarjetas.some(
             (tarjeta) =>
                 tarjeta.tipo === medio.tipo &&

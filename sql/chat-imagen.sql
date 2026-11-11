@@ -1,0 +1,1 @@
+ALTER TABLE mensaje ADD COLUMN IF NOT EXISTS imagen text;

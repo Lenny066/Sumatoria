@@ -149,18 +149,32 @@ export async function historialChat(req, res) {
     }
 }
 
-// POST /chat { texto }
+// POST /chat { texto, imagen }
+const IMAGEN_CHAT = /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+
 export async function enviarMensajeChat(req, res) {
-    const { texto } = req.body;
-    if (!textoValido(texto)) {
+    const { texto, imagen } = req.body;
+    const hayImagen = imagen !== undefined && imagen !== null;
+    if (hayImagen && (typeof imagen !== "string" || !IMAGEN_CHAT.test(imagen))) {
+        return res.status(400).json({ mensaje: "La foto no es válida" });
+    }
+    if (hayImagen && imagen.length > 7000000) {
+        return res.status(400).json({ mensaje: "La foto es demasiado pesada" });
+    }
+    if (!hayImagen && !textoValido(texto)) {
         return res.status(400).json({ mensaje: "El mensaje está vacío" });
     }
-    if (texto.length > 1000) {
+    if (texto !== undefined && typeof texto !== "string") {
+        return res.status(400).json({ mensaje: "El mensaje no es válido" });
+    }
+    if (texto && texto.length > 1000) {
         return res.status(400).json({ mensaje: "El mensaje es demasiado largo (máximo 1000 caracteres)" });
     }
 
     try {
-        return res.status(200).json(await chatService.enviarMensaje(req.usuario.id, texto.trim()));
+        return res
+            .status(200)
+            .json(await chatService.enviarMensaje(req.usuario.id, (texto ?? "").trim(), hayImagen ? imagen : null));
     } catch (error) {
         return manejarError(error, res);
     }

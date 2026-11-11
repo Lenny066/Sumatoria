@@ -21,6 +21,7 @@ function aMensaje(fila) {
         id: String(fila.id_mensaje),
         autor: fila.emisor,
         texto: fila.contenido,
+        ...(fila.imagen ? { imagen: fila.imagen } : {}),
         fecha: fila.fecha.toISOString()
     };
 }
@@ -65,9 +66,15 @@ function describirPromo(p) {
 }
 
 // ---------------------------------------------------------------------
-// Respuesta con IA (si hay una ANTHROPIC_API_KEY en el .env)
+// Respuesta con IA (si hay una GROQ_API_KEY en el .env)
 // ---------------------------------------------------------------------
-async function responderConIA(pregunta, promos, tarjetas, anteriores) {
+const SIN_FOTO_IA =
+    "Por ahora no puedo ver fotos. Contame qué estás buscando (por ejemplo zapatillas o un café) y te digo qué promos hay.";
+
+const PREGUNTA_FOTO = "Mirá esta foto y decime qué promos de la lista me sirven para esto.";
+
+
+async function responderConIA(pregunta, imagen, promos, tarjetas, anteriores) {
     const listaPromos = promos.length ? promos.map(describirPromo).join("\n") : "(no hay promos cargadas)";
     const listaTarjetas = tarjetas.length
         ? tarjetas.map((t) => textoMedio({ tipo: t.tipo, marca: t.marca, banco: t.banco })).join(", ")
@@ -77,30 +84,40 @@ async function responderConIA(pregunta, promos, tarjetas, anteriores) {
         "Sos el asistente de Sumatoria, una app argentina que muestra descuentos y promociones " +
         "de locales según las tarjetas del usuario. Respondé en español rioplatense, breve y amable. " +
         "Usá SOLO las promociones de la lista; si ninguna sirve, decilo y sugerí buscar otra cosa. " +
-        "No inventes locales ni descuentos.\n\n" +
+        "No inventes locales ni descuentos. " +
+        "Si el usuario manda una foto (un producto, una vidriera, un local o un ticket), " +
+        "decí brevemente qué ves y recomendá las promos de la lista que le sirvan para eso.\n\n" +
         `Tarjetas del usuario: ${listaTarjetas}\n\n` +
         `Promociones disponibles para este usuario:\n${listaPromos}`;
 
     // Últimos mensajes, para que la IA tenga el contexto de la charla
     const messages = anteriores
-        .map((m) => ({ role: m.emisor === "usuario" ? "user" : "assistant", content: m.contenido }))
-        .concat({ role: "user", content: pregunta });
+        .map((m) => ({
+            role: m.emisor === "usuario" ? "user" : "assistant",
+            content: m.contenido || (m.imagen ? "[Mandé una foto]" : "...")
+        }))
+        .concat({
+            role: "user",
+            content: imagen
+                ? [
+                      { type: "text", text: pregunta || PREGUNTA_FOTO },
+                      { type: "image_url", image_url: { url: imagen } }
+                  ]
+                : pregunta
+        });
 
-    // La API exige que el primer mensaje sea del usuario
     while (messages.length && messages[0].role !== "user") messages.shift();
 
-    const respuesta = await fetch("https://api.anthropic.com/v1/messages", {
+    const respuesta = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {
-            "x-api-key": process.env.ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
+            authorization: `Bearer ${process.env.GROQ_API_KEY}`,
             "content-type": "application/json"
         },
         body: JSON.stringify({
-            model: process.env.IA_MODELO || "claude-haiku-5-5",
+            model: process.env.IA_MODELO || "qwen/qwen3.8-27b",
             max_tokens: 600,
-            system,
-            messages
+            messages: [{ role: "system", content: system }, ...messages]
         }),
         signal: AbortSignal.timeout(30000)
     });
@@ -109,7 +126,7 @@ async function responderConIA(pregunta, promos, tarjetas, anteriores) {
         throw new Error(`La IA respondió con estado ${respuesta.status}: ${await respuesta.text()}`);
     }
     const datos = await respuesta.json();
-    return datos.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+    return (datos.choices?.[0]?.message?.content ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 }
 
 // ---------------------------------------------------------------------
@@ -157,34 +174,36 @@ function responderSinIA(pregunta, promos) {
 }
 
 // POST /chat { texto }
-export const enviarMensaje = async (idUsuario, texto) => {
+export const enviarMensaje = async (idUsuario, texto, imagen = null) => {
     // Últimos 10 mensajes (antes de guardar el nuevo), para el contexto de la IA
     const anteriores = await db.query(
-        `SELECT emisor, contenido FROM (
-             SELECT emisor, contenido, fecha, id_mensaje FROM mensaje
+        `SELECT emisor, contenido, imagen FROM (
+             SELECT emisor, contenido, imagen IS NOT NULL AS imagen, fecha, id_mensaje FROM mensaje
              WHERE id_usuario = $1 ORDER BY fecha DESC, id_mensaje DESC LIMIT 10
          ) ultimos ORDER BY fecha, id_mensaje`,
         [idUsuario]
     );
 
     const pregunta = await db.query(
-        `INSERT INTO mensaje (id_usuario, emisor, contenido) VALUES ($1, 'usuario', $2) RETURNING *`,
-        [idUsuario, texto]
+        `INSERT INTO mensaje (id_usuario, emisor, contenido, imagen) VALUES ($1, 'usuario', $2, $3) RETURNING *`,
+        [idUsuario, texto, imagen]
     );
 
     const tarjetas = await tarjetasDeUsuario(idUsuario);
     const promos = await promosParaUsuario(tarjetas);
 
+    const sinIA = () => (texto ? responderSinIA(texto, promos) : SIN_FOTO_IA);
+
     let contenido;
-    if (process.env.ANTHROPIC_API_KEY) {
+    if (process.env.GROQ_API_KEY) {
         try {
-            contenido = await responderConIA(texto, promos, tarjetas, anteriores.rows);
+            contenido = await responderConIA(texto, imagen, promos, tarjetas, anteriores.rows);
         } catch (error) {
             console.error("Falló la IA, respondo sin IA:", error.message);
-            contenido = responderSinIA(texto, promos);
+            contenido = sinIA();
         }
     } else {
-        contenido = responderSinIA(texto, promos);
+        contenido = sinIA();
     }
 
     const respuesta = await db.query(
